@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties'
+        minSdk 26
+        targetSdk 36
+        versionCode 30000000
+        versionName '3.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
