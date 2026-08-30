@@ -1,0 +1,83 @@
+name: Android Toolchain Cache
+
+on:
+  push:
+    paths:
+      - '.github/workflows/android-toolchain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_VERSION: '8.13'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prepare Android 36 and Gradle 8.13
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          curl -fL --retry 3 -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q /tmp/gradle.zip -d /tmp
+
+          mkdir -p /tmp/dummy/app/src/main/java/test/toolchain
+          cat > /tmp/dummy/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name='ToolchainWarmup'
+          include ':app'
+          EOF
+          cat > /tmp/dummy/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.13.2' apply false }
+          EOF
+          cat > /tmp/dummy/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'test.toolchain'
+            compileSdk 36
+            defaultConfig { applicationId 'test.toolchain'; minSdk 26; targetSdk 36; versionCode 1; versionName '1' }
+            compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          dependencies {
+            implementation 'androidx.activity:activity:1.13.0'
+            implementation 'androidx.core:core:1.17.0'
+            testImplementation 'junit:junit:4.13.2'
+          }
+          EOF
+          cat > /tmp/dummy/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:theme="@style/AppTheme"><activity android:name=".MainActivity" android:exported="true"/></application></manifest>
+          EOF
+          mkdir -p /tmp/dummy/app/src/main/res/values
+          cat > /tmp/dummy/app/src/main/res/values/styles.xml <<'EOF'
+          <resources><style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar"/></resources>
+          EOF
+          cat > /tmp/dummy/app/src/main/java/test/toolchain/MainActivity.java <<'EOF'
+          package test.toolchain; public class MainActivity extends android.app.Activity {}
+          EOF
+
+          cd /tmp/dummy
+          /tmp/gradle-${GRADLE_VERSION}/bin/gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
+
+          mkdir -p /tmp/toolchain/android-sdk/platforms /tmp/toolchain/android-sdk/build-tools /tmp/toolchain/gradle-home/caches
+          cp -a "$ANDROID_HOME/platforms/android-36" /tmp/toolchain/android-sdk/platforms/
+          cp -a "$ANDROID_HOME/build-tools/36.0.0" /tmp/toolchain/android-sdk/build-tools/
+          cp -a "$HOME/.gradle/caches/modules-2" /tmp/toolchain/gradle-home/caches/
+          cp -a "$HOME/.gradle/caches/8.13" /tmp/toolchain/gradle-home/caches/ || true
+          cp /tmp/gradle.zip /tmp/toolchain/gradle-8.13-bin.zip
+          du -sh /tmp/toolchain/* /tmp/toolchain/gradle-home/caches/* || true
+          tar -C /tmp -czf /tmp/android-toolchain-8.13-api36.tar.gz toolchain
+          ls -lh /tmp/android-toolchain-8.13-api36.tar.gz
+
+      - name: Upload toolchain artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-toolchain-8.13-api36
+          path: /tmp/android-toolchain-8.13-api36.tar.gz
+          compression-level: 0
+          retention-days: 1
