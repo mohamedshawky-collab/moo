@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Prepare Android 36 and Gradle 8.13
         shell: bash
         run: |
