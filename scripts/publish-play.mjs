@@ -13,7 +13,9 @@ if (!Number.isSafeInteger(versionCode) || versionCode <= 0 || versionCode > 2100
 if (!process.argv[2] || !credentialPath) throw Error('The signed MARKET bundle and existing secure Play service-account file are required.');
 const bytes = fs.readFileSync(process.argv[2]);
 const sha256 = createHash('sha256').update(bytes).digest('hex');
-const account = JSON.parse(fs.readFileSync(credentialPath, 'utf8'));
+let account;
+try { account = JSON.parse(fs.readFileSync(credentialPath, 'utf8')); }
+catch { throw Error('The secure Play service-account file is unavailable or invalid.'); }
 if (account.type !== 'service_account' || typeof account.client_email !== 'string' || typeof account.private_key !== 'string'
   || (account.token_uri && account.token_uri !== 'https://oauth2.googleapis.com/token')) {
   throw Error('The configured Play credential is not the supported existing Google service account.');
@@ -33,7 +35,10 @@ const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
   signal: AbortSignal.timeout(30000), redirect: 'error',
 });
 if (!tokenResponse.ok) throw Error(`Existing Play authentication failed (HTTP ${tokenResponse.status}).`);
-const { access_token } = await tokenResponse.json();
+let tokenBody;
+try { tokenBody = await tokenResponse.json(); }
+catch { throw Error('Play authentication returned an invalid response.'); }
+const { access_token } = tokenBody;
 if (!access_token) throw Error('Play authentication returned no access token.');
 const base = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' + packageName;
 let state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {};
