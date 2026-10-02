@@ -60,7 +60,11 @@ async function api(url, method = 'GET', body) {
   } catch {
     throw Error('The Play operation result is unknown. Preserve this run artifact and resume the same edit before repeating a mutation.');
   }
-  if (!response.ok) throw Error(`Play ${method} failed (HTTP ${response.status}). Keep the saved edit for reconciliation.`);
+  if (!response.ok) {
+    const error = Error(`Play ${method} failed (HTTP ${response.status}). Keep the saved edit for reconciliation.`);
+    error.httpStatus = response.status;
+    throw error;
+  }
   return response.status === 204 ? {} : await response.json();
 }
 const releaseFor = tracks => (tracks.tracks || []).find(track => track.track === 'production')?.releases
@@ -80,7 +84,7 @@ const editBase = base + '/edits/' + encodeURIComponent(state.editId);
 let tracks;
 try { tracks = await api(editBase + '/tracks'); }
 catch (error) {
-  if (!['committing', 'submitted_to_play'].includes(state.phase)) throw error;
+  if (!['committing', 'submitted_to_play'].includes(state.phase) || ![404, 410].includes(error.httpStatus)) throw error;
   // Committed edits close. Read live state in a fresh edit before claiming the previous commit succeeded.
   const view = await api(base + '/edits', 'POST', {});
   const viewBase = base + '/edits/' + encodeURIComponent(view.id);
@@ -100,7 +104,10 @@ if (existing && existing.sha256?.toLowerCase() !== sha256) {
 }
 if (codesFor(tracks).some(code => code > versionCode)) throw Error('Google Play contains a newer release. Preserve it and select a newer unused version code.');
 const production = releaseFor(tracks);
-if (production?.status === 'completed' && existing) {
+// Only an untouched newly opened edit reflects a previously committed release.
+// A resumed edit may contain our uncommitted track update; preserve that edit and
+// finish its commit rather than deleting it and claiming a production submission.
+if (production?.status === 'completed' && existing && state.phase === 'edit_open') {
   await api(editBase, 'DELETE');
   save('submitted_to_play');
   report('already_in_production_track', production.status);
