@@ -34,10 +34,8 @@ jobs:
       BSM_MARKET_KEY_ALIAS: ${{ secrets.BSM_MARKET_KEY_ALIAS }}
       BSM_MARKET_KEY_PASSWORD: ${{ secrets.BSM_MARKET_KEY_PASSWORD }}
       BSM_MARKET_UPLOAD_CERT_SHA256: ${{ vars.BSM_MARKET_UPLOAD_CERT_SHA256 }}
-      BSM_MARKET_KEYSTORE_FILE: ${{ runner.temp }}/bsm-market-upload.jks
-      BSM_PLAY_SERVICE_ACCOUNT_FILE: ${{ runner.temp }}/bsm-market-play.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Bind existing signing and Play identity
         shell: bash
         env:
@@ -45,6 +43,9 @@ jobs:
           PLAY_ACCOUNT_JSON: ${{ secrets.BSM_PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
           set -euo pipefail
+          export BSM_MARKET_KEYSTORE_FILE="$RUNNER_TEMP/bsm-market-upload.jks"
+          export BSM_PLAY_SERVICE_ACCOUNT_FILE="$RUNNER_TEMP/bsm-market-play.json"
+          printf 'BSM_MARKET_KEYSTORE_FILE=%s\nBSM_PLAY_SERVICE_ACCOUNT_FILE=%s\n' "$BSM_MARKET_KEYSTORE_FILE" "$BSM_PLAY_SERVICE_ACCOUNT_FILE" >> "$GITHUB_ENV"
           for binding in KEYSTORE_BASE64 PLAY_ACCOUNT_JSON BSM_MARKET_STORE_PASSWORD BSM_MARKET_KEY_ALIAS BSM_MARKET_KEY_PASSWORD BSM_MARKET_UPLOAD_CERT_SHA256; do
             if [ -z "${!binding}" ]; then
               echo "::error::Existing secure binding $binding is unavailable. No key was generated and no Play release was submitted."
@@ -58,11 +59,11 @@ jobs:
           umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$BSM_MARKET_KEYSTORE_FILE"
           printf '%s' "$PLAY_ACCOUNT_JSON" > "$BSM_PLAY_SERVICE_ACCOUNT_FILE"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
       - name: Preserve the existing upload certificate
@@ -86,11 +87,11 @@ jobs:
           path: app/build/outputs/market-production
       - name: Set up Android SDK
         if: inputs.resume_run_id == ''
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4.0.4
       - name: Install Android 36 SDK
         if: inputs.resume_run_id == ''
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6.4.0
         if: inputs.resume_run_id == ''
         with:
           gradle-version: '8.13'
