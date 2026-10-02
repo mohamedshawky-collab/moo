@@ -1,0 +1,130 @@
+name: Publish BSM MARKET Android Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Existing package's next unused version code
+        required: true
+        type: string
+      version_name:
+        description: Release version name
+        required: true
+        type: string
+      resume_run_id:
+        description: Previous run ID when reconciling an interrupted release
+        required: false
+        type: string
+
+concurrency:
+  group: bsm-market-android-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      BSM_MARKET_VERSION_CODE: ${{ inputs.version_code }}
+      BSM_MARKET_VERSION_NAME: ${{ inputs.version_name }}
+      BSM_MARKET_STORE_PASSWORD: ${{ secrets.BSM_MARKET_STORE_PASSWORD }}
+      BSM_MARKET_KEY_ALIAS: ${{ secrets.BSM_MARKET_KEY_ALIAS }}
+      BSM_MARKET_KEY_PASSWORD: ${{ secrets.BSM_MARKET_KEY_PASSWORD }}
+      BSM_MARKET_UPLOAD_CERT_SHA256: ${{ vars.BSM_MARKET_UPLOAD_CERT_SHA256 }}
+      BSM_MARKET_KEYSTORE_FILE: ${{ runner.temp }}/bsm-market-upload.jks
+      BSM_PLAY_SERVICE_ACCOUNT_FILE: ${{ runner.temp }}/bsm-market-play.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bind existing signing and Play identity
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BSM_MARKET_KEYSTORE_BASE64 }}
+          PLAY_ACCOUNT_JSON: ${{ secrets.BSM_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          for binding in KEYSTORE_BASE64 PLAY_ACCOUNT_JSON BSM_MARKET_STORE_PASSWORD BSM_MARKET_KEY_ALIAS BSM_MARKET_KEY_PASSWORD BSM_MARKET_UPLOAD_CERT_SHA256; do
+            if [ -z "${!binding}" ]; then
+              echo "::error::Existing secure binding $binding is unavailable. No key was generated and no Play release was submitted."
+              exit 3
+            fi
+          done
+          if ! [[ "$BSM_MARKET_VERSION_CODE" =~ ^[1-9][0-9]{0,9}$ ]]; then
+            echo "::error::A valid unused version code is required."
+            exit 3
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$BSM_MARKET_KEYSTORE_FILE"
+          printf '%s' "$PLAY_ACCOUNT_JSON" > "$BSM_PLAY_SERVICE_ACCOUNT_FILE"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Preserve the existing upload certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -exportcert -keystore "$BSM_MARKET_KEYSTORE_FILE" -alias "$BSM_MARKET_KEY_ALIAS" -storepass:env BSM_MARKET_STORE_PASSWORD -file "$RUNNER_TEMP/bsm-market-upload.der"
+          actual=$(sha256sum "$RUNNER_TEMP/bsm-market-upload.der" | cut -d ' ' -f 1)
+          expected=$(printf '%s' "$BSM_MARKET_UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')
+          if ! [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || [ "$actual" != "$expected" ]; then
+            echo "::error::Configured keystore does not match the existing MARKET upload certificate in Google Play App Integrity."
+            exit 3
+          fi
+      - name: Restore an interrupted release
+        if: inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.resume_run_id }}
+          name: bsm-market-production-${{ inputs.version_code }}
+          path: app/build/outputs/market-production
+      - name: Set up Android SDK
+        if: inputs.resume_run_id == ''
+        uses: android-actions/setup-android@v3
+      - name: Install Android 36 SDK
+        if: inputs.resume_run_id == ''
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        if: inputs.resume_run_id == ''
+        with:
+          gradle-version: '8.13'
+      - name: Build with the existing upload key
+        if: inputs.resume_run_id == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle requireExistingMarketSigning :app:bundleRelease --stacktrace
+          mkdir -p app/build/outputs/market-production
+          cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/market-production/market-release.aab
+      - name: Reconcile and submit production release
+        shell: bash
+        run: |
+          set -euo pipefail
+          jarsigner -verify app/build/outputs/market-production/market-release.aab
+          keytool -printcert -jarfile app/build/outputs/market-production/market-release.aab -rfc | openssl x509 -outform DER > "$RUNNER_TEMP/bsm-market-bundle.der"
+          actual=$(sha256sum "$RUNNER_TEMP/bsm-market-bundle.der" | cut -d ' ' -f 1)
+          expected=$(printf '%s' "$BSM_MARKET_UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Signed bundle does not use the existing MARKET upload certificate."
+            exit 3
+          fi
+          BSM_PLAY_RELEASE_STATE=app/build/outputs/market-production/play-release-state.json node scripts/publish-play.mjs app/build/outputs/market-production/market-release.aab > app/build/outputs/market-production/play-release-result.json
+          cat app/build/outputs/market-production/play-release-result.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve signed bundle and reconciliation state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsm-market-production-${{ inputs.version_code }}
+          path: app/build/outputs/market-production/
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Remove temporary credentials
+        if: always()
+        shell: bash
+        run: rm -f "$BSM_MARKET_KEYSTORE_FILE" "$BSM_PLAY_SERVICE_ACCOUNT_FILE" "$RUNNER_TEMP/bsm-market-upload.der" "$RUNNER_TEMP/bsm-market-bundle.der"

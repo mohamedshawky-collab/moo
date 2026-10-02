@@ -2,6 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
+def marketVersionCode = providers.environmentVariable('BSM_MARKET_VERSION_CODE').orElse('30000000').get().toInteger()
+def marketVersionName = providers.environmentVariable('BSM_MARKET_VERSION_NAME').orElse('3.0.0').get()
+def marketKeystore = providers.environmentVariable('BSM_MARKET_KEYSTORE_FILE').orNull
+
 android {
     namespace 'branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties'
     compileSdk 36
@@ -10,19 +14,37 @@ android {
         applicationId 'branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties'
         minSdk 26
         targetSdk 36
-        versionCode 30000000
-        versionName '3.0.0'
+        versionCode marketVersionCode
+        versionName marketVersionName
+    }
+
+    signingConfigs {
+        if (marketKeystore) {
+            existingUploadKey {
+                storeFile file(marketKeystore)
+                storePassword providers.environmentVariable('BSM_MARKET_STORE_PASSWORD').get()
+                keyAlias providers.environmentVariable('BSM_MARKET_KEY_ALIAS').get()
+                keyPassword providers.environmentVariable('BSM_MARKET_KEY_PASSWORD').get()
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             shrinkResources false
+            if (marketKeystore) signingConfig signingConfigs.existingUploadKey
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.register('requireExistingMarketSigning') {
+    doLast {
+        if (!marketKeystore) throw new GradleException('The existing MARKET upload keystore must be bound securely before a signed production release.')
     }
 }
