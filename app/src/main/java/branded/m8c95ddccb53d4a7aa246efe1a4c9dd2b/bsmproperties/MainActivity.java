@@ -19,6 +19,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.ValueCallback;
 import android.widget.FrameLayout;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -26,7 +27,9 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
-    private static final String HOME_URL = "https://www.bsm-properties.com/";
+    private static final String HOME_URL = "https://bsm-properties.com/";
+    private final MarketFileChooser fileChooser = new MarketFileChooser();
+    private android.window.OnBackInvokedCallback backCallback;
     private WebView webView;
     private ProgressBar progressBar;
     private LinearLayout connectionMessage;
@@ -86,6 +89,11 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         configureWebView();
+        if (Build.VERSION.SDK_INT >= 33) {
+            backCallback = this::navigateBack;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
+        }
 
         Uri incoming = getIntent() != null ? getIntent().getData() : null;
         String initialUrl = isAllowedHttpUri(incoming) ? incoming.toString() : HOME_URL;
@@ -113,6 +121,12 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (!MarketNavigation.internal(Uri.parse(view.getUrl() == null ? "" : view.getUrl()))) return false;
+                return fileChooser.open(MainActivity.this, params, callback);
+            }
+
+            @Override
             public void onProgressChanged(WebView view, int newProgress) {
                 progressBar.setProgress(newProgress);
                 progressBar.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
@@ -124,7 +138,7 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if (isAllowedHttpUri(uri)) return false;
-                openExternal(uri);
+                if (request.isForMainFrame()) openExternal(uri);
                 return true;
             }
 
@@ -157,18 +171,11 @@ public class MainActivity extends Activity {
     }
 
     private boolean isAllowedHttpUri(Uri uri) {
-        if (uri == null) return false;
-        String scheme = uri.getScheme();
-        String host = uri.getHost();
-        if (scheme == null || host == null) return false;
-        boolean https = "https".equalsIgnoreCase(scheme);
-        boolean allowedHost = "bsm-properties.com".equalsIgnoreCase(host)
-                || "www.bsm-properties.com".equalsIgnoreCase(host);
-        return https && allowedHost;
+        return MarketNavigation.internal(uri);
     }
 
     private void openExternal(Uri uri) {
-        if (uri == null) return;
+        if (!MarketNavigation.external(uri)) return;
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, uri);
             startActivity(intent);
@@ -195,15 +202,26 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        navigateBack();
+    }
+
+    private void navigateBack() {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
-            super.onBackPressed();
+            finish();
         }
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (!fileChooser.result(requestCode, resultCode, data)) super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
     protected void onDestroy() {
+        fileChooser.cancel();
+        if (Build.VERSION.SDK_INT >= 33 && backCallback != null) getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         if (webView != null) {
             webView.stopLoading();
             webView.setWebChromeClient(null);
