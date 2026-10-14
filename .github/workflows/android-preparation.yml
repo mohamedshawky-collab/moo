@@ -18,7 +18,31 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6.4.0
         with:
           gradle-version: '8.13'
+      - name: Qualify existing upload key only when its secure bindings already exist
+        env:
+          BSM_MARKET_KEYSTORE_BASE64: ${{ secrets.BSM_MARKET_KEYSTORE_BASE64 }}
+          BSM_MARKET_STORE_PASSWORD: ${{ secrets.BSM_MARKET_STORE_PASSWORD }}
+          BSM_MARKET_KEY_ALIAS: ${{ secrets.BSM_MARKET_KEY_ALIAS }}
+          BSM_MARKET_KEY_PASSWORD: ${{ secrets.BSM_MARKET_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          mkdir -p app/build/outputs
+          if [[ -z "$BSM_MARKET_KEYSTORE_BASE64" || -z "$BSM_MARKET_STORE_PASSWORD" || -z "$BSM_MARKET_KEY_ALIAS" || -z "$BSM_MARKET_KEY_PASSWORD" ]]; then
+            printf '{"signed":false,"reason":"existing_upload_key_bindings_unavailable","storeUploads":0}\n' > app/build/outputs/signing-receipt.json
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$BSM_MARKET_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/market-existing-upload.keystore"
+          keytool -exportcert -keystore "$RUNNER_TEMP/market-existing-upload.keystore" -alias "$BSM_MARKET_KEY_ALIAS" -storepass:env BSM_MARKET_STORE_PASSWORD -file "$RUNNER_TEMP/market-upload-public.der"
+          cert=$(sha256sum "$RUNNER_TEMP/market-upload-public.der" | cut -d ' ' -f1)
+          test "$cert" = '445be170f089ae404380addd5de6afeba0428ee8ec05c854e869c0329a8dcf5c'
+          printf 'BSM_MARKET_KEYSTORE_FILE=%s/market-existing-upload.keystore\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf '{"keyQualified":true,"uploadCertificateSHA256":"%s","storeUploads":0}\n' "$cert" > app/build/outputs/signing-receipt.json
       - name: Test Android 8 and Android 16, then compile unsigned bundle
+        env:
+          BSM_MARKET_STORE_PASSWORD: ${{ secrets.BSM_MARKET_STORE_PASSWORD }}
+          BSM_MARKET_KEY_ALIAS: ${{ secrets.BSM_MARKET_KEY_ALIAS }}
+          BSM_MARKET_KEY_PASSWORD: ${{ secrets.BSM_MARKET_KEY_PASSWORD }}
         run: gradle :app:testDebugUnitTest :app:bundleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         if: always()
@@ -26,6 +50,12 @@ jobs:
           name: market-android-prepare-105592228
           path: |
             app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/signing-receipt.json
             app/build/test-results/testDebugUnitTest
             app/build/reports/tests/testDebugUnitTest
           if-no-files-found: warn
+      - name: Remove ephemeral signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/market-existing-upload.keystore" "$RUNNER_TEMP/market-upload-public.der"
+
