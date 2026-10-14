@@ -54,7 +54,8 @@ public class MarketWebViewTest {
         Activity activity=Robolectric.buildActivity(Activity.class).create().get();MarketFileChooser chooser=new MarketFileChooser();List<Uri[]> results=new ArrayList<>();
         chooser.open(activity,params(true),results::add);Uri a=Uri.parse("content://documents.test/a"),b=Uri.parse("content://documents.test/b");
         ClipData clip=ClipData.newRawUri("test",a);clip.addItem(new ClipData.Item(b));clip.addItem(new ClipData.Item(a));
-        chooser.result(MarketFileChooser.REQUEST_CODE,Activity.RESULT_OK,new Intent().setClipData(clip));
+        Intent selection = new Intent(); selection.setClipData(clip);
+        chooser.result(MarketFileChooser.REQUEST_CODE,Activity.RESULT_OK,selection);
         assertArrayEquals(new Uri[]{a,b},results.get(0));
     }
     @Test public void cancellationAndReplacementReleasePreviousCallback() {
@@ -78,3 +79,4 @@ public class MarketWebViewTest {
         controller.destroy();assertEquals(1,result.size());assertNull(result.get(0));
     }
 }
+
