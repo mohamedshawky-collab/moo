@@ -1,0 +1,31 @@
+name: Prepare MARKET Android without store upload
+on:
+  push:
+    branches: [codex/market-android-prepare-20261014]
+permissions:
+  contents: read
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6.4.0
+        with:
+          gradle-version: '8.13'
+      - name: Test Android 8 and Android 16, then compile unsigned bundle
+        run: gradle :app:testDebugUnitTest :app:bundleRelease --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: market-android-prepare-105592228
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/test-results/testDebugUnitTest
+            app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: warn
