@@ -38,9 +38,15 @@ final class MarketFileChooser {
         pending = null;
         activeCode = -1;
         if (callback == null) return true;
-        Uri[] parsed = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+        ArrayList<Uri> parsed = new ArrayList<>();
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            if (data.getClipData() != null) {
+                for (int index = 0; index < data.getClipData().getItemCount(); index++)
+                    parsed.add(data.getClipData().getItemAt(index).getUri());
+            } else if (data.getData() != null) parsed.add(data.getData());
+        }
         LinkedHashSet<Uri> safe = new LinkedHashSet<>();
-        if (parsed != null) for (Uri uri : parsed) {
+        for (Uri uri : parsed) {
             // Never pass a returned file:// or an app-private provider to WebView.
             String authority = uri == null ? null : uri.getAuthority();
             if (uri == null || !"content".equalsIgnoreCase(uri.getScheme()) || authority == null
@@ -59,3 +65,4 @@ final class MarketFileChooser {
         if (callback != null) callback.onReceiveValue(null);
     }
 }
+
