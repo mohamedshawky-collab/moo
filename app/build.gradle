@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def marketVersionCode = providers.environmentVariable('BSM_MARKET_VERSION_CODE').orElse('30000000').get().toInteger()
-def marketVersionName = providers.environmentVariable('BSM_MARKET_VERSION_NAME').orElse('3.0.0').get()
+def marketVersionCode = providers.environmentVariable('BSM_MARKET_VERSION_CODE').orElse('105592228').get().toInteger()
+def marketVersionName = providers.environmentVariable('BSM_MARKET_VERSION_NAME').orElse('3.0.2').get()
 def marketKeystore = providers.environmentVariable('BSM_MARKET_KEYSTORE_FILE').orNull
 
 android {
@@ -41,6 +41,12 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    testOptions { unitTests.includeAndroidResources = true }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
 }
 
 tasks.register('requireExistingMarketSigning') {
