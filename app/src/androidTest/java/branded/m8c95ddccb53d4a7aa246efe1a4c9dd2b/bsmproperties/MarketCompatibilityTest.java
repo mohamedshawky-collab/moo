@@ -39,7 +39,7 @@ public class MarketCompatibilityTest {
                         pageLoaded.countDown();
                     }
                 });
-                web.loadDataWithBaseURL("https://bsm-properties.com/", "<input type='file'>", "text/html", "UTF-8", null);
+                web.loadDataWithBaseURL("https://bsm-properties.com/", "<input type='file'>", "text/html", "UTF-8", "https://bsm-properties.com/");
             });
             assertTrue("The trusted test page must finish loading before opening its picker", pageLoaded.await(15, TimeUnit.SECONDS));
             for (int i = 0; i < 2; i++) {
