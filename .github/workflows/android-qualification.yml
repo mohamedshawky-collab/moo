@@ -70,6 +70,15 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: gradle --no-daemon :app:connectedDebugAndroidTest
+      - name: Report instrumentation results
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for path in Path('app/build/outputs/androidTest-results').rglob('*.xml'):
+              print(path)
+              print(path.read_text()[:12000])
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

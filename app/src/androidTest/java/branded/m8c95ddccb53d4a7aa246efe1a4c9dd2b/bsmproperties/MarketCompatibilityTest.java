@@ -10,6 +10,7 @@ import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
 import android.webkit.WebChromeClient;
+import android.webkit.WebViewClient;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -27,17 +28,26 @@ public class MarketCompatibilityTest {
                 new IntentFilter(Intent.ACTION_GET_CONTENT),
                 new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true);
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            CountDownLatch pageLoaded = new CountDownLatch(1);
             scenario.onActivity(activity -> {
                 WebView web = findWebView(activity.getWindow().getDecorView());
                 web.stopLoading();
+                WebViewClient original = web.getWebViewClient();
+                web.setWebViewClient(new WebViewClient() {
+                    @Override public void onPageFinished(WebView view, String url) {
+                        original.onPageFinished(view, url);
+                        pageLoaded.countDown();
+                    }
+                });
                 web.loadDataWithBaseURL("https://bsm-properties.com/", "<input type='file'>", "text/html", "UTF-8", null);
             });
-            instrumentation.waitForIdleSync();
+            assertTrue("The trusted test page must finish loading before opening its picker", pageLoaded.await(15, TimeUnit.SECONDS));
             for (int i = 0; i < 2; i++) {
                 CountDownLatch returned = new CountDownLatch(1);
                 scenario.onActivity(activity -> {
                     WebView web = findWebView(activity.getWindow().getDecorView());
-                    assertTrue(web.getWebChromeClient().onShowFileChooser(web, files -> {
+                    assertEquals("https://bsm-properties.com/", web.getUrl());
+                    assertTrue("The trusted page must open its document picker", web.getWebChromeClient().onShowFileChooser(web, files -> {
                         assertNull(files);
                         returned.countDown();
                     }, new WebChromeClient.FileChooserParams() {
