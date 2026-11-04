@@ -1,10 +1,11 @@
 package branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties;
 
 import android.net.Uri;
-import android.app.Activity;
 import android.app.Instrumentation;
+import android.accessibilityservice.AccessibilityService;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.os.SystemClock;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -24,9 +25,6 @@ import static org.junit.Assert.*;
 public class MarketCompatibilityTest {
     @Test public void documentChooserCanCancelAndOpenAgain() throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
-        Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
-                new IntentFilter(Intent.ACTION_GET_CONTENT),
-                new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true);
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             CountDownLatch pageLoaded = new CountDownLatch(1);
             scenario.onActivity(activity -> {
@@ -36,7 +34,7 @@ public class MarketCompatibilityTest {
                 web.setWebViewClient(new WebViewClient() {
                     @Override public void onPageFinished(WebView view, String url) {
                         original.onPageFinished(view, url);
-                        pageLoaded.countDown();
+                        if ("https://bsm-properties.com/".equals(view.getUrl())) pageLoaded.countDown();
                     }
                 });
                 web.loadDataWithBaseURL("https://bsm-properties.com/", "<input type='file'>", "text/html", "UTF-8", "https://bsm-properties.com/");
@@ -59,11 +57,25 @@ public class MarketCompatibilityTest {
                         @Override public Intent createIntent() { return new Intent(Intent.ACTION_GET_CONTENT).setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); }
                     }));
                 });
+                long deadline = SystemClock.elapsedRealtime() + 15000;
+                String pickerPackage = "";
+                while (SystemClock.elapsedRealtime() < deadline) {
+                    AccessibilityNodeInfo root = instrumentation.getUiAutomation().getRootInActiveWindow();
+                    if (root != null && root.getPackageName() != null) {
+                        pickerPackage = root.getPackageName().toString();
+                        if (!pickerPackage.equals("branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties")
+                                && !pickerPackage.equals("com.android.systemui")) break;
+                    }
+                    SystemClock.sleep(100);
+                }
+                assertTrue("The Android document picker must be visible; active=" + pickerPackage,
+                        pickerPackage.contains("documentsui") || pickerPackage.contains("photopicker")
+                                || pickerPackage.contains("providers.media") || pickerPackage.contains("intentresolver")
+                                || pickerPackage.equals("android"));
+                assertTrue(instrumentation.getUiAutomation().performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK));
                 assertTrue("Cancellation must resolve the page callback", returned.await(10, TimeUnit.SECONDS));
+                instrumentation.waitForIdleSync();
             }
-            assertEquals(2, monitor.getHits());
-        } finally {
-            instrumentation.removeMonitor(monitor);
         }
     }
 
