@@ -1,6 +1,9 @@
 package branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties;
 
-import android.app.Activity;
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
@@ -19,17 +22,30 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.ValueCallback;
 import android.widget.FrameLayout;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-public class MainActivity extends Activity {
-    private static final String HOME_URL = "https://www.bsm-properties.com/";
+public class MainActivity extends ComponentActivity {
+    private static final String HOME_URL = "https://bsm-properties.com/";
     private WebView webView;
     private ProgressBar progressBar;
     private LinearLayout connectionMessage;
+    private ValueCallback<Uri[]> pendingFiles;
+    private final OnBackPressedCallback webBack = new OnBackPressedCallback(false) {
+        @Override public void handleOnBackPressed() {
+            webView.goBack();
+        }
+    };
+    private final ActivityResultLauncher<Intent> filePicker = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                Uri[] files = WebChromeClient.FileChooserParams.parseResult(
+                        result.getResultCode(), result.getData());
+                completeFileSelection(areSafeSelectedFiles(files) ? files : null);
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -86,6 +102,7 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         configureWebView();
+        getOnBackPressedDispatcher().addCallback(this, webBack);
 
         Uri incoming = getIntent() != null ? getIntent().getData() : null;
         String initialUrl = isAllowedHttpUri(incoming) ? incoming.toString() : HOME_URL;
@@ -113,6 +130,25 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                    FileChooserParams params) {
+                if (pendingFiles != null || !isAllowedHttpUri(Uri.parse(
+                        view.getUrl() == null ? "" : view.getUrl()))) return false;
+                if (params.getMode() != FileChooserParams.MODE_OPEN
+                        && params.getMode() != FileChooserParams.MODE_OPEN_MULTIPLE) return false;
+                pendingFiles = callback;
+                try {
+                    Intent picker = params.createIntent();
+                    picker.addCategory(Intent.CATEGORY_OPENABLE);
+                    picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    filePicker.launch(picker);
+                } catch (ActivityNotFoundException | SecurityException ignored) {
+                    completeFileSelection(null);
+                }
+                return true;
+            }
+
+            @Override
             public void onProgressChanged(WebView view, int newProgress) {
                 progressBar.setProgress(newProgress);
                 progressBar.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
@@ -130,7 +166,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onSafeBrowsingHit(WebView view, WebResourceRequest request, int threatType, SafeBrowsingResponse callback) {
-                callback.backToSafety(true);
+                if (Build.VERSION.SDK_INT >= 27) callback.backToSafety(true);
             }
 
             @Override
@@ -147,6 +183,12 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 progressBar.setVisibility(View.GONE);
+                webBack.setEnabled(view.canGoBack());
+            }
+
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                webBack.setEnabled(view.canGoBack());
             }
         });
     }
@@ -156,7 +198,7 @@ public class MainActivity extends Activity {
         connectionMessage.setVisibility(View.VISIBLE);
     }
 
-    private boolean isAllowedHttpUri(Uri uri) {
+    static boolean isAllowedHttpUri(Uri uri) {
         if (uri == null) return false;
         String scheme = uri.getScheme();
         String host = uri.getHost();
@@ -164,11 +206,31 @@ public class MainActivity extends Activity {
         boolean https = "https".equalsIgnoreCase(scheme);
         boolean allowedHost = "bsm-properties.com".equalsIgnoreCase(host)
                 || "www.bsm-properties.com".equalsIgnoreCase(host);
-        return https && allowedHost;
+        return https && allowedHost && uri.getUserInfo() == null
+                && (uri.getPort() == -1 || uri.getPort() == 443);
+    }
+
+    static boolean areSafeSelectedFiles(Uri[] files) {
+        if (files == null || files.length == 0) return false;
+        for (Uri file : files) {
+            if (file == null || !"content".equalsIgnoreCase(file.getScheme())
+                    || file.getAuthority() == null || file.getAuthority().isEmpty()) return false;
+        }
+        return true;
+    }
+
+    private void completeFileSelection(Uri[] files) {
+        ValueCallback<Uri[]> callback = pendingFiles;
+        pendingFiles = null;
+        if (callback != null) callback.onReceiveValue(files);
     }
 
     private void openExternal(Uri uri) {
         if (uri == null) return;
+        String scheme = uri.getScheme();
+        if (!("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme)
+                || "mailto".equalsIgnoreCase(scheme) || "tel".equalsIgnoreCase(scheme)
+                || "whatsapp".equalsIgnoreCase(scheme))) return;
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, uri);
             startActivity(intent);
@@ -194,16 +256,8 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
-    }
-
-    @Override
     protected void onDestroy() {
+        completeFileSelection(null);
         if (webView != null) {
             webView.stopLoading();
             webView.setWebChromeClient(null);
