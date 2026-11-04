@@ -1,18 +1,62 @@
 package branded.m8c95ddccb53d4a7aa246efe1a4c9dd2b.bsmproperties;
 
 import android.net.Uri;
+import android.app.Activity;
+import android.app.Instrumentation;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
+import android.webkit.WebChromeClient;
+import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class MarketCompatibilityTest {
+    @Test public void documentChooserCanCancelAndOpenAgain() throws Exception {
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
+                new IntentFilter(Intent.ACTION_GET_CONTENT),
+                new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true);
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> {
+                WebView web = findWebView(activity.getWindow().getDecorView());
+                web.stopLoading();
+                web.loadDataWithBaseURL("https://bsm-properties.com/", "<input type='file'>", "text/html", "UTF-8", null);
+            });
+            instrumentation.waitForIdleSync();
+            for (int i = 0; i < 2; i++) {
+                CountDownLatch returned = new CountDownLatch(1);
+                scenario.onActivity(activity -> {
+                    WebView web = findWebView(activity.getWindow().getDecorView());
+                    assertTrue(web.getWebChromeClient().onShowFileChooser(web, files -> {
+                        assertNull(files);
+                        returned.countDown();
+                    }, new WebChromeClient.FileChooserParams() {
+                        @Override public int getMode() { return MODE_OPEN_MULTIPLE; }
+                        @Override public String[] getAcceptTypes() { return new String[]{"image/*", "application/pdf"}; }
+                        @Override public boolean isCaptureEnabled() { return false; }
+                        @Override public CharSequence getTitle() { return null; }
+                        @Override public String getFilenameHint() { return null; }
+                        @Override public Intent createIntent() { return new Intent(Intent.ACTION_GET_CONTENT).setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); }
+                    }));
+                });
+                assertTrue("Cancellation must resolve the page callback", returned.await(10, TimeUnit.SECONDS));
+            }
+            assertEquals(2, monitor.getHits());
+        } finally {
+            instrumentation.removeMonitor(monitor);
+        }
+    }
+
     @Test public void startsWithSecureWebViewAndOriginalPackage() {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             scenario.onActivity(activity -> {
